@@ -1,16 +1,16 @@
-# version: '3.3'
+version: '3.3'
 services:
   mysql:
     image: mysql:5.7
     restart: always
     environment:
-      MYSQL_DATABASE: 'afvalical'
+      MYSQL_DATABASE: 'DBASE_NAME_GOES_HERE'
       # So you don't have to use root, but you can if you like
-      MYSQL_USER: 'afvalical'
+      MYSQL_USER: 'DBASE_USER_GOES_HERE'
       # You can use whatever password you like
-      MYSQL_PASSWORD: 'm0nk3y'
+      MYSQL_PASSWORD: 'somerandompassword'
       # Password for root access
-      MYSQL_ROOT_PASSWORD: 'Polle007'
+      MYSQL_ROOT_PASSWORD: 'somerandomrootpassword'
     ports:
       # <Port exposed> : < MySQL Port running inside container>
       - '3306:3306'

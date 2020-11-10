@@ -18,6 +18,9 @@ Dit om eventuele problemen met foutieve zoekopdrachten te kunnen onderzoeken.
 Deze applicatie is een hobbyproject en komt zonder enige vorm van garantie of support.  
 Bugs en issues mogen steeds gemeld worden op de github pagina van dit project.
 
+# .ENV
+see the .env.example file for a list of expected environment variables
+
 # TODO
 - ajax-like input fields: fetch address info while user types
 - add brussels and wallonia address support

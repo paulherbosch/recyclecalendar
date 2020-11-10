@@ -1,0 +1,48 @@
+<h4>Adres</h4>
+
+<form action='/' method='post' class="form-inline well">
+<div class="form-group">
+  <table class="table">
+    <tr>
+      <td><label for="postalcode">Postcode:</label></td>
+      <td><input name="postalcode" id="postalcode" type="text" class="form-control" style="width: 100%"></td>
+      <td><label for="streetname">Straatnaam:</label></td>
+      <td><input name="streetname" id="streetname" type="text" class="form-control" style="width: 100%"></td>
+      <td><label for="housenumber">Huisnummer:</label></td>
+      <td><input name="housenumber" id="housenumber" type="text" class="form-control" style="width: 100%"></td>
+      <td><input class="btn primary" type='submit' name='getpickups' value='Ga Verder'></td>
+    </tr>
+  </table>
+</div>
+</form>
+
+<% if @pickup_events %>
+
+<h4>Info</h4>
+<pre id="pickup_info" class="alert alert-info">Afvalkalender voor <%=h @pickupinfo['streetname'] %> <%=h @pickupinfo['housenumber'] %>, <%=h @pickupinfo['postalcode'] %> <%=h @pickupinfo['gemeentenaam'] %>. Van <%=h @pickupinfo['fromdate'] %> tot <%=h @pickupinfo['untildate'] %></pre>
+
+<% if @pickup_events.any? %>
+
+<h4>ICS link</h4>
+<button onclick="copyToClipboard('#ics_formatted_url')">Kopieer naar clipboard</button>
+Onderstaande link kan gebruikt worden als kalender-url in applicaties zoals Ical of Google Calendar
+<pre id="ics_formatted_url" class="alert alert-info"><%=h @ics_formatted_url %></pre>
+
+<h4>Afvalkalender</h4>
+<% @pickup_events.each do |event| %>
+<pre class="alert alert-warning" id="bla" style="background-color:<%= event['color'] %>;color:#ffffff"><%= event['formattedtimestamp'] %>: <%= event['fraction'] %></pre><br>
+<% end %>
+
+<% else %>
+
+<h4>Geen data gevonden</h4>
+<pre id="no_data" class="alert alert-info">Voorlopig kan enkel data voor adressen in Vlaanderen opgevraagd worden.</pre>
+<% end %>
+
+<% end %>
+
+<% if @error_content %>
+  <h4> Het adres werd niet herkend</h4>
+  Foutcode: <%= @error_content %>
+<% end %>
+

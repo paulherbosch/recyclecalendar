@@ -6,7 +6,6 @@ require 'dotenv/load'
 require 'curb'
 require 'icalendar'
 require 'date'
-require 'pp'
 require 'active_support/core_ext' 
 require 'mysql2'
 require 'sequel'
@@ -204,10 +203,10 @@ helpers do
 
     # fetch api result and http status code
     vlaanderen_api_adresmatch_json            = JSON.parse(vlaanderen_api_adresmatch.body_str)
-    vlaanderen_api_adresmatch_http_statuscode = JSON.parse(vlaanderen_api_adresmatch.status)
+    vlaanderen_api_adresmatch_http_statuscode = vlaanderen_api_adresmatch.status
 
     # error handling - check if a valid result was retrieved from the api
-    if vlaanderen_api_adresmatch_http_statuscode == 200
+    if vlaanderen_api_adresmatch_http_statuscode.include? "200"
       # if no warnings are present, we found a valid address
       if vlaanderen_api_adresmatch_json['warnings'].empty?
         vlaanderen_adresmatch = Hash.new

@@ -1,18 +1,21 @@
 <h4>Adres</h4>
-
-<form action='/' method='post' class="form-inline well">
+<form action="/" method="post" class="form-inline well">
 <div class="form-group">
-  <table class="table">
-    <tr>
-      <td><label for="postalcode">Postcode:</label></td>
-      <td><input name="postalcode" id="postalcode" type="number" class="form-control" style="width: 100%" required pattern="[0-0]{4}"></td>
-      <td><label for="streetname">Straatnaam:</label></td>
-      <td><input name="streetname" id="streetname" type="text" class="form-control" style="width: 100%" required></td>
-      <td><label for="housenumber">Huisnummer:</label></td>
-      <td><input name="housenumber" id="housenumber" type="number" class="form-control" style="width: 100%" required></td>
-      <td><input class="btn primary" type='submit' name='getpickups' value='Ga Verder'></td>
-    </tr>
-  </table>
+  <div class="form-group">
+    <label for="postalcode">Postcode:</label>
+    <input name="postalcode" id="postalcode" type="number" class="form-control" style="width: 100%" required="" pattern="[0-0]{4}">
+  </div>
+  <div class="form-group">
+    <label for="streetname">Straatnaam:</label>
+      <input name="streetname" id="streetname" type="text" class="form-control" style="width: 100%" required="">
+  </div>
+  <div class="form-group">
+      <label for="housenumber">Huisnummer:</label>
+      <input name="housenumber" id="housenumber" type="number" class="form-control" style="width: 100%" required="">
+  </div>
+  <div class="form-group">
+      <input class="btn primary" type="submit" name="getpickups" value="Ga Verder">
+  </div>
 </div>
 </form>
 

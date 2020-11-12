@@ -38,28 +38,6 @@ configure do
   $appconfig['mysql_user']     = ENV['MYSQL_USER']     || nil
   $appconfig['mysql_password'] = ENV['MYSQL_PASSWORD'] || nil
 
-  $DB = Sequel.connect(
-          adapter:  'mysql2',
-          user:     $appconfig['mysql_user'],
-          password: $appconfig['mysql_password'],
-          host:     $appconfig['mysql_host'],
-          port:     $appconfig['mysql_port'],
-          database: $appconfig['mysql_database']) 
-
-  # create addresses table if it doesn't exist
-  unless $DB.table_exists?(:addresses)
-    $DB.create_table :addresses do
-      primary_key :id
-      column :created, 'timestamp'
-      column :postalcode, Integer
-      column :streetname, String
-      column :housenumber, Integer
-      column :http_status, Integer
-      column :api_warning, String
-      column :format, String
-    end
-  end
-
   #
   # Global Variables
   #
@@ -241,6 +219,30 @@ helpers do
   # log all address lookups to the database
   #
   def add_record_to_database(postalcode,streetname,housenumber,http_status,api_warning)
+    # connect to the database
+    $DB = Sequel.connect(
+            adapter:  'mysql2',
+            test:     true,
+            user:     $appconfig['mysql_user'],
+            password: $appconfig['mysql_password'],
+            host:     $appconfig['mysql_host'],
+            port:     $appconfig['mysql_port'],
+            database: $appconfig['mysql_database'])
+
+    # create addresses table if it doesn't exist
+    unless $DB.table_exists?(:addresses)
+      $DB.create_table :addresses do
+        primary_key :id
+        column :created, 'timestamp'
+        column :postalcode, Integer
+        column :streetname, String
+        column :housenumber, Integer
+        column :http_status, Integer
+        column :api_warning, String
+        column :format, String
+      end
+    end
+
     # see how we were called (webinterface or ical program)
     format = String.new
     if params['getpickups']
@@ -251,6 +253,7 @@ helpers do
       format = "undefined"
     end
 
+    # insert a new record
     table = $DB[:addresses]
     table.insert(
       postalcode:  postalcode,
@@ -259,6 +262,9 @@ helpers do
       http_status: http_status,
       api_warning: api_warning,
       format:      format)
+
+    # clean up the database connection
+    $DB.disconnect
   end
 
   # create an ICS object based on the events we pulled from recycleapp.be

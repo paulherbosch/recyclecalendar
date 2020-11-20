@@ -57,6 +57,12 @@ configure do
   # Untildate is last day of this year. Last date with events in calendar
   $appconfig['untildate'] = Date.today.end_of_year.strftime("%F")
 
+  # Notifications
+  $appconfig['notifications'] = ENV['NOTIFICATIONS']  || nil
+
+  # Timezone
+  $appconfig['timezone'] = ENV['TIMEZONE']  || nil
+
   # Postal Code Matrix - Use correct backend for streetname lookups
   # Currently only addresses in Flanders can be resolved correctly
   # 
@@ -269,17 +275,33 @@ helpers do
 
   # create an ICS object based on the events we pulled from recycleapp.be
   #
-  def generate_ics(events)
-    # convert events to Ical format
+  def generate_ics(events,timezone,notifications)
+    # create calendar object
     cal = Icalendar::Calendar.new
 
+    # set calendar timezone
+    cal.timezone do |t|
+      t.tzid = timezone
+    end
+
+    # populate calendar with events
     events.each do |pickup_event|
       dt = Date.parse(pickup_event['timestamp'])
-      event = Icalendar::Event.new #our new event
+      event = Icalendar::Event.new
       event.dtstart = Icalendar::Values::Date.new(dt)
       event.dtend   = Icalendar::Values::Date.new(dt + 1)
       event.summary = pickup_event['fraction']
       event.transp = 'TRANSPARENT'
+
+      # if required, enable notifications: one day up front
+      if notifications == 'true' or notifications == '1'
+        event.alarm do |a|
+          a.summary = pickup_event['fraction']
+          a.trigger = "-P1DT0H0M0S" # 1 day before
+        end
+      end
+
+      # add the new event to the calendar object
       cal.add_event(event)
     end 
 
@@ -303,9 +325,11 @@ end
 
 # main page
 route :get, :post, '/' do
-  postalcode  = params['postalcode']  || $appconfig['postalcode']
-  streetname  = params['streetname']  || $appconfig['streetname']
-  housenumber = params['housenumber'] || $appconfig['housenumber']
+  postalcode    = params['postalcode']    || $appconfig['postalcode']
+  streetname    = params['streetname']    || $appconfig['streetname']
+  housenumber   = params['housenumber']   || $appconfig['housenumber']
+  notifications = params['notifications'] || $appconfig['notifications']
+  timezone      = params['timezone']      || $appconfig['timezone']
 
   # check if a valid request comes in
   if params['getpickups'] or params['format'] == 'ics' or (postalcode and streetname and housenumber)
@@ -314,6 +338,7 @@ route :get, :post, '/' do
 
     # set ics formatted url
     @ics_formatted_url = "#{request.scheme}://#{request.host}/?postalcode=#{postalcode}&streetname=#{streetname}&housenumber=#{housenumber}&format=ics"
+    @ics_formatted_url_with_notifications = "#{request.scheme}://#{request.host}/?postalcode=#{postalcode}&streetname=#{streetname}&housenumber=#{housenumber}&format=ics&notifications=true"
 
     # generate a hash with info to display in the :ics template
     @pickupinfo = Hash.new
@@ -326,7 +351,7 @@ route :get, :post, '/' do
 
     if params['format'] == 'ics'
       # render ICS format and halt
-      halt generate_ics(@pickup_events)
+      halt generate_ics(@pickup_events,timezone,notifications)
     else
       # or render html and halt
       halt erb :ics

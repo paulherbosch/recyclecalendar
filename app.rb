@@ -51,12 +51,6 @@ configure do
   $appconfig['vlaanderen_api_token'] = ENV['VLAANDEREN_API_TOKEN'] || nil
   $appconfig['vlaanderen_api_url']   = ENV['VLAANDEREN_API_URL']   || nil
 
-  # Fromdate is first day of the month. Earliest date with events in calendar
-  $appconfig['fromdate']  = Date.today.beginning_of_month.strftime("%F")
-
-  # Untildate is last day of this year. Last date with events in calendar
-  $appconfig['untildate'] = Date.today.end_of_year.strftime("%F")
-
   # Notifications
   $appconfig['notifications'] = ENV['NOTIFICATIONS']  || nil
 
@@ -161,14 +155,23 @@ helpers do
     zipcodeid    = @zipcodeid_streetnameid_gemeentenaam['zipcodeid']
     streetnameid = @zipcodeid_streetnameid_gemeentenaam['streetnameid']
 
-    fromdate  = $appconfig['fromdate']
-    untildate = $appconfig['untildate']
+    # Fromdate is first day of the month. Earliest date with events in calendar
+    @fromdate = Date.today.beginning_of_month.strftime("%F")
+
+    # Untildate is last day of this year. Last date with events in calendar
+    # Unless month is december, then search for events next year
+    thismonth = Date.today.strftime("%m")
+    if thismonth == "12"
+      @untildate = Date.today.next_month.end_of_year.strftime("%F")
+    else
+      @untildate = Date.today.end_of_year.strftime("%F")
+    end
 
     # set the correct backend for the streetname
     $postalcode_matrix.each do |postalcoderange,backend|
       if postalcoderange.include? postalcode.to_i
         # example: https://recycleapp.be/api/app/v1/collections?zipcodeId=1234-24043&streetId=https://data.vlaanderen.be/id/straatnaam-5678&houseNumber=100&fromDate=2020-11-01&untilDate=2020-12-31&size=100
-        recycleapp_url = recycleapp_base_url + "?zipcodeId=" + postalcode + "-" + zipcodeid + "&streetId=" + backend + "-" + streetnameid + "&houseNumber=" + housenumber + "&fromDate=" + fromdate + "&untilDate=" + untildate + "&size=100"
+        recycleapp_url = recycleapp_base_url + "?zipcodeId=" + postalcode + "-" + zipcodeid + "&streetId=" + backend + "-" + streetnameid + "&houseNumber=" + housenumber + "&fromDate=" + @fromdate + "&untilDate=" + @untildate + "&size=100"
         return recycleapp_url
       end
     end
@@ -243,7 +246,7 @@ helpers do
         column :postalcode, Integer
         column :streetname, String
         column :housenumber, Integer
-        column :http_status, Integer
+        column :http_status, String
         column :api_warning, String
         column :format, String
       end
@@ -346,8 +349,8 @@ route :get, :post, '/' do
     @pickupinfo['streetname']   = streetname 
     @pickupinfo['housenumber']  = housenumber 
     @pickupinfo['gemeentenaam'] = @zipcodeid_streetnameid_gemeentenaam['gemeentenaam']
-    @pickupinfo['fromdate']     = $appconfig['fromdate']
-    @pickupinfo['untildate']    = $appconfig['untildate']
+    @pickupinfo['fromdate']     = @fromdate
+    @pickupinfo['untildate']    = @untildate
 
     if params['format'] == 'ics'
       # render ICS format and halt

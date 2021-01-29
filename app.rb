@@ -45,7 +45,12 @@ configure do
   # Recycle App
   $appconfig['recycleapp_base_url']  = ENV['RECYCLEAPP_BASE_URL']  || nil
   $appconfig['recycleapp_token_url'] = ENV['RECYCLEAPP_TOKEN_URL'] || nil
-  $appconfig['recycleapp_x_secret']  = ENV['RECYCLEAPP_X_SECRET']  || nil
+ 
+  # 2021-01-29: the recycleapp_x_secret value changed
+  # the RECYCLEAPP_X_SECRET variable is now automatically retrieved
+  # from the recycleapp.be main javascript file
+  #
+  # $appconfig['recycleapp_x_secret']  = ENV['RECYCLEAPP_X_SECRET']  || nil
 
   # Vlaanderen API
   $appconfig['vlaanderen_api_token'] = ENV['VLAANDEREN_API_TOKEN'] || nil
@@ -128,16 +133,30 @@ helpers do
   end
 
   # a token is required to get access to recycleapp.be
-  # $recycleapp_x_secret is required to retrieve a token
-  # strangely enough, $recycleapp_x_secret seems to be a fixed value?
-  # when this gets fixed on recycleapp.be, this application will probably break ...
+  #
+  # the value for recycleapp_x_secret, which is required to fetch the token, is hidden inside the main javascript file
+  # we do a dirty scrape to fetch the filename of the main javascript
+  # then we search for the secret string inside the javascript file
+  # and use that string to retrieve the token
+  #
+  # This is dirty. Sorry.
   #
   def fetch_recycleapp_token(token_url)
-    # https://recycleapp.be/api/app/v1/access-token
+    # search for the main.*.chunk.js filename inside the html returned by https://recycleapp.be
+    recycleapp_index_html = Curl.get("https://recycleapp.be")
+    main_js_filename      = recycleapp_index_html.body_str[/(?:src="| )(\/static\/js\/main\..*?\.chunk\.js)/,1]
+
+    # in the main.*.js filename just scraped from the html,
+    # search for the secret string we need to use as recycleapp_x_secret
+    recycleapp_main_js_script = Curl.get("https://recycleapp.be#{main_js_filename}")
+    recycleapp_x_secret       = recycleapp_main_js_script.body_str[/var n\=\"(.*?)\",c\=\"\/api\/v1\/assets\/\"/,1]
+
+    # retrieve an access token on https://recycleapp.be/api/app/v1/access-token
+    # using the scraped recycleapp_x_secret
     recycleapp_token_json = Curl.get(token_url) do |curl|
       curl.headers["Accept"]     = "application/json, text/plain, */*"
       curl.headers["x-consumer"] = "recycleapp.be"
-      curl.headers["x-secret"]   = $appconfig['recycleapp_x_secret']
+      curl.headers["x-secret"]   = recycleapp_x_secret
     end
 
     recycleapp_token = JSON.parse(recycleapp_token_json.body_str)

@@ -1,7 +1,3 @@
-# NOTIFICATION
-As of 2021-01-29 this app no longer works.  
-Recycleapp.be has locked down access to the api.  
-
 # recyclecalendar
 Convert recycleapp.be API into ICS calendar
 

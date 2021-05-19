@@ -31,9 +31,6 @@ Onderstaande links kunnen gebruikt worden als kalender-url in applicaties zoals 
 <button onclick="copyToClipboard('#ics_formatted_url')">Kopieer naar clipboard</button>
 Kalender zonder notificaties
 <pre id="ics_formatted_url" class="alert alert-info"><%=h @ics_formatted_url %></pre>
-<button onclick="copyToClipboard('#ics_formatted_url_with_notifications')">Kopieer naar clipboard</button>
-Kalender met notificaties 24 uur op voorhand
-<pre id="ics_formatted_url_with_notifications" class="alert alert-info"><%=h @ics_formatted_url_with_notifications %></pre>
 
 <h4>Afvalkalender</h4>
 <% @pickup_events.each do |event| %>

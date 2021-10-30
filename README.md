@@ -21,6 +21,17 @@ Bugs en issues mogen steeds gemeld worden op de github pagina van dit project.
 # .ENV
 see the .env.example file for a list of expected environment variables
 
+# Caching
+The app stores a list of pickup events in a database caching table to reduce the number of api calls made to recycleapp.be.  
+Each cache entry expires after 14 days by default.
+
+# Issues
+recycleapp.be seems to be blocking access to their API for certain ip addresses.  
+this app allows you to define a list of (open) proxy servers to access recycleapp.be.  
+when mutiple proxies are defined, each proxy will be tested to see if it has access to recycleapp.be.
+
+open proxy performance is flaky and can result in errors from time to time.
+
 # TODO
 - ajax-like input fields: fetch address info while user types
 - add brussels and wallonia address support

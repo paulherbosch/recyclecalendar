@@ -6,9 +6,12 @@ require 'dotenv/load'
 require 'curb'
 require 'icalendar'
 require 'date'
+require 'active_support'
 require 'active_support/core_ext' 
 require 'mysql2'
 require 'sequel'
+require 'net/ping'
+require 'base64'
 
 include ERB::Util
 
@@ -45,23 +48,20 @@ configure do
   # Recycle App
   $appconfig['recycleapp_base_url']  = ENV['RECYCLEAPP_BASE_URL']  || nil
   $appconfig['recycleapp_token_url'] = ENV['RECYCLEAPP_TOKEN_URL'] || nil
-  $appconfig['recycleapp_x_secret']  = ENV['RECYCLEAPP_X_SECRET']  || nil
-
+ 
   # Vlaanderen API
   $appconfig['vlaanderen_api_token'] = ENV['VLAANDEREN_API_TOKEN'] || nil
   $appconfig['vlaanderen_api_url']   = ENV['VLAANDEREN_API_URL']   || nil
 
-  # Fromdate is first day of the month. Earliest date with events in calendar
-  $appconfig['fromdate']  = Date.today.beginning_of_month.strftime("%F")
-
-  # Untildate is last day of this year. Last date with events in calendar
-  $appconfig['untildate'] = Date.today.end_of_year.strftime("%F")
-
-  # Notifications
-  $appconfig['notifications'] = ENV['NOTIFICATIONS']  || nil
-
   # Timezone
   $appconfig['timezone'] = ENV['TIMEZONE']  || nil
+
+  # proxy
+  $appconfig['proxies']      = ENV['PROXIES'] || nil
+  $appconfig['proxytesturl'] = ENV['PROXYTESTURL'] || nil
+
+  # Pickup Events Cache TTL
+  $appconfig['cache_ttl_days'] = ENV['CACHE_TTL_DAYS'] || nil
 
   # Postal Code Matrix - Use correct backend for streetname lookups
   # Currently only addresses in Flanders can be resolved correctly
@@ -98,6 +98,10 @@ helpers do
   # it pulls a pickup calendar from recycleapp.be based on postalcode, streetname and housenumber
   #
   def get_pickup_dates(postalcode,streetname,housenumber)
+    # do we need to use a proxy?
+    if $appconfig['proxies']
+      $proxyserver = select_proxy($appconfig['proxies'])
+    end
 
     # construct the url we need to call to get all pickup events from recycleapp.be
     #
@@ -112,6 +116,9 @@ helpers do
       curl.headers["Accept"]          = "application/json, text/plain, */*"
       curl.headers["Authorization"]   = recycleapp_token
       curl.headers["x-consumer"]      = "recycleapp.be"
+      if $appconfig['proxies']
+        curl.proxy_url                  = $proxyserver
+      end
     end
 
     # convert the received events into a Ruby data structure
@@ -134,19 +141,45 @@ helpers do
   end
 
   # a token is required to get access to recycleapp.be
-  # $recycleapp_x_secret is required to retrieve a token
-  # strangely enough, $recycleapp_x_secret seems to be a fixed value?
-  # when this gets fixed on recycleapp.be, this application will probably break ...
+  #
+  # the value for recycleapp_x_secret, which is required to fetch the token, is hidden inside the main javascript file
+  # we do a dirty scrape to fetch the filename of the main javascript
+  # then we search for the secret string inside the javascript file
+  # and use that string to retrieve the token
+  #
+  # This is dirty. Sorry.
   #
   def fetch_recycleapp_token(token_url)
-    # https://recycleapp.be/api/app/v1/access-token
+    # search for the main.*.chunk.js filename inside the html returned by https://recycleapp.be
+    recycleapp_index_html = Curl.get("https://recycleapp.be") do |curl|
+      if $appconfig['proxies']
+        curl.proxy_url = $proxyserver
+      end
+    end
+    main_js_filename = recycleapp_index_html.body_str[/(?:src="| )(\/static\/js\/main\..*?\.chunk\.js)/,1]
+
+    # in the main.*.js filename just scraped from the html,
+    # search for the secret string we need to use as recycleapp_x_secret
+    recycleapp_main_js_script = Curl.get("https://recycleapp.be#{main_js_filename}") do |curl|
+      if $appconfig['proxies']
+        curl.proxy_url = $proxyserver
+      end
+    end
+    recycleapp_x_secret = recycleapp_main_js_script.body_str[/var n\=\"(.*?)\",c\=\"\/api\/v1\/assets\/\"/,1]
+
+    # retrieve an access token on https://recycleapp.be/api/app/v1/access-token
+    # using the scraped recycleapp_x_secret
     recycleapp_token_json = Curl.get(token_url) do |curl|
       curl.headers["Accept"]     = "application/json, text/plain, */*"
       curl.headers["x-consumer"] = "recycleapp.be"
-      curl.headers["x-secret"]   = $appconfig['recycleapp_x_secret']
+      curl.headers["x-secret"]   = recycleapp_x_secret
+      if $appconfig['proxies']
+        curl.proxy_url           = $proxyserver
+      end
     end
 
     recycleapp_token = JSON.parse(recycleapp_token_json.body_str)
+
     return recycleapp_token['accessToken']
   end
 
@@ -161,14 +194,24 @@ helpers do
     zipcodeid    = @zipcodeid_streetnameid_gemeentenaam['zipcodeid']
     streetnameid = @zipcodeid_streetnameid_gemeentenaam['streetnameid']
 
-    fromdate  = $appconfig['fromdate']
-    untildate = $appconfig['untildate']
+    # Fromdate is first day of the month. Earliest date with events in calendar
+    @fromdate = Date.today.beginning_of_month.strftime("%F")
+
+    # Untildate is last day of this year. Last date with events in calendar
+    # Unless month is december, then search for events next year
+    thismonth = Date.today.strftime("%m")
+    if thismonth == "12"
+      @untildate = Date.today.next_month.end_of_year.strftime("%F")
+    else
+      @untildate = Date.today.end_of_year.strftime("%F")
+    end
 
     # set the correct backend for the streetname
     $postalcode_matrix.each do |postalcoderange,backend|
       if postalcoderange.include? postalcode.to_i
         # example: https://recycleapp.be/api/app/v1/collections?zipcodeId=1234-24043&streetId=https://data.vlaanderen.be/id/straatnaam-5678&houseNumber=100&fromDate=2020-11-01&untilDate=2020-12-31&size=100
-        recycleapp_url = recycleapp_base_url + "?zipcodeId=" + postalcode + "-" + zipcodeid + "&streetId=" + backend + "-" + streetnameid + "&houseNumber=" + housenumber + "&fromDate=" + fromdate + "&untilDate=" + untildate + "&size=100"
+        recycleapp_url = recycleapp_base_url + "?zipcodeId=" + postalcode + "-" + zipcodeid + "&streetId=" + backend + "-" + streetnameid + "&houseNumber=" + housenumber + "&fromDate=" + @fromdate + "&untilDate=" + @untildate + "&size=100"
+
         return recycleapp_url
       end
     end
@@ -227,13 +270,13 @@ helpers do
   def add_record_to_database(postalcode,streetname,housenumber,http_status,api_warning)
     # connect to the database
     $DB = Sequel.connect(
-            adapter:  'mysql2',
-            test:     true,
-            user:     $appconfig['mysql_user'],
-            password: $appconfig['mysql_password'],
-            host:     $appconfig['mysql_host'],
-            port:     $appconfig['mysql_port'],
-            database: $appconfig['mysql_database'])
+      adapter:  'mysql2',
+      test:     true,
+      user:     $appconfig['mysql_user'],
+      password: $appconfig['mysql_password'],
+      host:     $appconfig['mysql_host'],
+      port:     $appconfig['mysql_port'],
+      database: $appconfig['mysql_database'])
 
     # create addresses table if it doesn't exist
     unless $DB.table_exists?(:addresses)
@@ -243,7 +286,7 @@ helpers do
         column :postalcode, Integer
         column :streetname, String
         column :housenumber, Integer
-        column :http_status, Integer
+        column :http_status, String
         column :api_warning, String
         column :format, String
       end
@@ -273,9 +316,76 @@ helpers do
     $DB.disconnect
   end
 
+  # store pickup events in mysql cache
+  #
+  def add_pickup_events_to_database(ics_formatted_url,pickup_events,gemeentenaam,fromdate,untildate)
+    # connect to the database
+    $DB = Sequel.connect(
+      adapter:  'mysql2',
+      test:     true,
+      user:     $appconfig['mysql_user'],
+      password: $appconfig['mysql_password'],
+      host:     $appconfig['mysql_host'],
+      port:     $appconfig['mysql_port'],
+      database: $appconfig['mysql_database'])
+
+    pickup_event_cache = $DB[:cache]
+
+    # delete expired cache entry
+    logger.info("=== INFO - removing expired cache record from database for #{ics_formatted_url} ===")
+    pickup_event_cache.where(request_url: ics_formatted_url).delete
+
+    # add cache entry to database
+    logger.info("=== INFO - add new cache record to database for #{ics_formatted_url} ===")
+    pickup_event_cache.insert(
+      request_url:   ics_formatted_url,
+      gemeentenaam:  gemeentenaam,
+      fromdate:      fromdate,
+      untildate:     untildate,
+      pickup_events: pickup_events)
+
+    # clean up the database connection
+    $DB.disconnect
+  end
+
+  # retrieve list of pickups for a cached address
+  #
+  def retrieve_cache_from_database(ics_formatted_url)
+    # connect to the database
+    $DB = Sequel.connect(
+      adapter:  'mysql2',
+      test:     true,
+      user:     $appconfig['mysql_user'],
+      password: $appconfig['mysql_password'],
+      host:     $appconfig['mysql_host'],
+      port:     $appconfig['mysql_port'],
+      database: $appconfig['mysql_database'])
+
+    # create addresses table if it doesn't exist
+    unless $DB.table_exists?(:cache)
+      $DB.create_table :cache do
+        primary_key :id
+        column :created, 'timestamp'
+        column :request_url, String
+        column :gemeentenaam, String
+        column :fromdate, String
+        column :untildate, String
+        column :pickup_events, 'varchar(30000)'
+      end
+    end
+
+    # search for ics calendar
+    cached_pickup_events = $DB[:cache].where(:request_url => ics_formatted_url)
+
+    # clean up the database connection
+    $DB.disconnect
+
+    return cached_pickup_events
+  end
+
   # create an ICS object based on the events we pulled from recycleapp.be
   #
-  def generate_ics(events,timezone,notifications)
+  def generate_ics(events,timezone)
     # create calendar object
     cal = Icalendar::Calendar.new
 
@@ -293,20 +403,62 @@ helpers do
       event.summary = pickup_event['fraction']
       event.transp = 'TRANSPARENT'
 
-      # if required, enable notifications: one day up front
-      if notifications == 'true' or notifications == '1'
-        event.alarm do |a|
-          a.summary = pickup_event['fraction']
-          a.trigger = "-P1DT0H0M0S" # 1 day before
-        end
-      end
-
       # add the new event to the calendar object
       cal.add_event(event)
     end 
 
     ical_string = cal.to_ical
+
     return ical_string
+  end
+
+  # loop over a list of proxies and select one that can reach recycleapp.be
+  #
+  def select_proxy(proxies)
+    # convert comma separtated list of proxies into array
+    proxylist   = proxies.split(",")
+
+    # loop over proxylist and select a proxy that can reach recycleapp.be
+    proxylist.each do |proxy|
+      logger.info("=== INFO - testing proxy server:     #{proxy} ===")
+      checked_proxy = proxy_check(proxy)
+
+      if checked_proxy['response_code'] == 200
+        logger.info("=== INFO - testing proxy server:     #{proxy} ===")
+        logger.info("=== INFO - selected proxy server:    #{proxy} ===")
+
+        return proxy
+        break
+      else
+        logger.info("=== INFO - proxy did not return 200: #{proxy} ===")
+      end
+    end
+  end
+
+  # check if a proxy is reachable and if it can reach recycleapp.be
+  #
+  def proxy_check(proxy)
+    proxytotest                     = Hash.new
+    proxytotest['address_and_port'] = proxy
+    proxytotest['address']          = proxy[/(.*?):(\d+)/,1]
+    proxytotest['port']             = proxy[/(.*?):(\d+)/,2]
+
+    # if the proxy can be reached on it's ip address and tcp port, test if it can reach the testurl
+    proxy = Net::Ping::TCP.new(proxytotest['address'], proxytotest['port'].to_i)
+    if proxy.ping?
+      @resp = Curl::Easy.new($appconfig['proxytesturl']) { |easy|
+        easy.proxy_url  = proxytotest['address']
+        easy.proxy_port = proxytotest['port'].to_i
+        easy.follow_location = true
+        easy.proxy_tunnel = true
+      }
+
+      @resp.perform
+      @resp.response_code
+      proxytotest['response_code'] = @resp.response_code
+    end
+
+    return proxytotest
   end
 end
 
@@ -328,30 +480,48 @@ route :get, :post, '/' do
   postalcode    = params['postalcode']    || $appconfig['postalcode']
   streetname    = params['streetname']    || $appconfig['streetname']
   housenumber   = params['housenumber']   || $appconfig['housenumber']
-  notifications = params['notifications'] || $appconfig['notifications']
   timezone      = params['timezone']      || $appconfig['timezone']
+
+  # set ics formatted url, used in the :ics template
+  @ics_formatted_url = "#{request.scheme}://#{request.host}/?postalcode=#{postalcode}&streetname=#{streetname}&housenumber=#{housenumber}&format=ics"
 
   # check if a valid request comes in
   if params['getpickups'] or params['format'] == 'ics' or (postalcode and streetname and housenumber)
-    # get list of pickups
-    @pickup_events = get_pickup_dates(postalcode,streetname,housenumber)
+    # check if pickup events already exists in the mysql cache
+    cached_pickup_events = retrieve_cache_from_database(@ics_formatted_url)
 
-    # set ics formatted url
-    @ics_formatted_url = "#{request.scheme}://#{request.host}/?postalcode=#{postalcode}&streetname=#{streetname}&housenumber=#{housenumber}&format=ics"
-    @ics_formatted_url_with_notifications = "#{request.scheme}://#{request.host}/?postalcode=#{postalcode}&streetname=#{streetname}&housenumber=#{housenumber}&format=ics&notifications=true"
+    # if the address was found and the entry is younger than $appconfig['cache_ttl_days']
+    # do not contact recycleapp.be but display cached info instead
+    if cached_pickup_events.count > 0 and cached_pickup_events.map(:created)[0] > $appconfig['cache_ttl_days'].to_i.days.ago
+      cache_create_date = cached_pickup_events.map(:created)[0]
+      logger.info("=== INFO - retrieving cached entry created on #{cache_create_date} ===")
+
+      @pickup_events = JSON.parse(Base64.decode64(cached_pickup_events.map(:pickup_events)[0]))
+      @gemeentenaam  = cached_pickup_events.map(:gemeentenaam)[0]
+      @fromdate      = cached_pickup_events.map(:fromdate)[0]
+      @untildate     = cached_pickup_events.map(:untildate)[0]
+    else
+      # get list of pickups from recycleapp.be
+      logger.info("=== INFO - no cache hit, retrieving from recycleapp.be ===")
+      @pickup_events = get_pickup_dates(postalcode,streetname,housenumber)
+      @gemeentenaam  = @zipcodeid_streetnameid_gemeentenaam['gemeentenaam']
+
+      # store freshly retrieved pickup events in the database cache
+      add_pickup_events_to_database(@ics_formatted_url,Base64.encode64(@pickup_events.to_json),@zipcodeid_streetnameid_gemeentenaam['gemeentenaam'],@fromdate,@untildate)
+    end
 
     # generate a hash with info to display in the :ics template
     @pickupinfo = Hash.new
     @pickupinfo['postalcode']   = postalcode 
     @pickupinfo['streetname']   = streetname 
     @pickupinfo['housenumber']  = housenumber 
-    @pickupinfo['gemeentenaam'] = @zipcodeid_streetnameid_gemeentenaam['gemeentenaam']
-    @pickupinfo['fromdate']     = $appconfig['fromdate']
-    @pickupinfo['untildate']    = $appconfig['untildate']
+    @pickupinfo['gemeentenaam'] = @gemeentenaam
+    @pickupinfo['fromdate']     = @fromdate
+    @pickupinfo['untildate']    = @untildate
 
     if params['format'] == 'ics'
       # render ICS format and halt
-      halt generate_ics(@pickup_events,timezone,notifications)
+      halt generate_ics(@pickup_events,timezone)
     else
       # or render html and halt
       halt erb :ics

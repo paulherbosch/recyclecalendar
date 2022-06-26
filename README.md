@@ -32,6 +32,13 @@ when mutiple proxies are defined, each proxy will be tested to see if it has acc
 
 open proxy performance is flaky and can result in errors from time to time.
 
+# Optioneel
+Optioneel kan aan de ICS-link de parameter `excludes` meegegeven worden om bepaalde ophalingen niet in de ICS-feed mee op te nemen. Bv:
+
+```
+https://afvalical.herbosch.be/?postalcode=0612&streetname=Spanjestraat&housenumber=1&format=ics&excludes=Oude%20metalen%20op%20aanvraag,Snoeihout%20op%20aanvraag
+```
+
 # TODO
 - ajax-like input fields: fetch address info while user types
 - add brussels and wallonia address support

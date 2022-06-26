@@ -165,7 +165,7 @@ helpers do
         curl.proxy_url = $proxyserver
       end
     end
-    recycleapp_x_secret = recycleapp_main_js_script.body_str[/var n\=\"(.*?)\",c\=\"\/api\/v1\/assets\/\"/,1]
+    recycleapp_x_secret = recycleapp_main_js_script.body_str[/var n\=\"(.*?)\",r\=\"\/api\/app\/v1\/assets\/\"/,1]
 
     # retrieve an access token on https://recycleapp.be/api/app/v1/access-token
     # using the scraped recycleapp_x_secret
@@ -385,7 +385,7 @@ helpers do
 
   # create an ICS object based on the events we pulled from recycleapp.be
   #
-  def generate_ics(events,timezone)
+  def generate_ics(events,timezone, excludes)
     # create calendar object
     cal = Icalendar::Calendar.new
 
@@ -394,8 +394,13 @@ helpers do
       t.tzid = timezone
     end
 
+    excludelist = excludes.split(',')
+
     # populate calendar with events
     events.each do |pickup_event|
+      # skip to the next pickup_event if we're not interested in this fraction.
+      next if excludelist.include? pickup_event['fraction']
+
       dt = Date.parse(pickup_event['timestamp'])
       event = Icalendar::Event.new
       event.dtstart = Icalendar::Values::Date.new(dt)
@@ -481,6 +486,7 @@ route :get, :post, '/' do
   streetname    = params['streetname']    || $appconfig['streetname']
   housenumber   = params['housenumber']   || $appconfig['housenumber']
   timezone      = params['timezone']      || $appconfig['timezone']
+  excludes      = params['excludes']      || $appconfig['excludes']
 
   # set ics formatted url, used in the :ics template
   @ics_formatted_url = "#{request.scheme}://#{request.host}/?postalcode=#{postalcode}&streetname=#{streetname}&housenumber=#{housenumber}&format=ics"
@@ -521,7 +527,7 @@ route :get, :post, '/' do
 
     if params['format'] == 'ics'
       # render ICS format and halt
-      halt generate_ics(@pickup_events,timezone)
+      halt generate_ics(@pickup_events,timezone,excludes)
     else
       # or render html and halt
       halt erb :ics

@@ -63,6 +63,10 @@ configure do
   # Pickup Events Cache TTL
   $appconfig['cache_ttl_days'] = ENV['CACHE_TTL_DAYS'] || nil
 
+
+  # Exclude list
+  $appconfig['excludes'] = ENV['EXCLUDES'] || nil
+
   # Postal Code Matrix - Use correct backend for streetname lookups
   # Currently only addresses in Flanders can be resolved correctly
   # 
@@ -101,6 +105,11 @@ helpers do
     # do we need to use a proxy?
     if $appconfig['proxies']
       $proxyserver = select_proxy($appconfig['proxies'])
+
+      if $proxyserver == "no proxy selected"
+        @error_content = "Unable to reach one of the configured proxy servers."
+        halt erb :ics
+      end
     end
 
     # construct the url we need to call to get all pickup events from recycleapp.be
@@ -394,12 +403,16 @@ helpers do
       t.tzid = timezone
     end
 
-    excludelist = excludes.split(',')
+    if excludes
+      excludelist = excludes.split(',')
+    end
 
     # populate calendar with events
     events.each do |pickup_event|
       # skip to the next pickup_event if we're not interested in this fraction.
-      next if excludelist.include? pickup_event['fraction']
+      if excludes
+        next if excludelist.include? pickup_event['fraction']
+      end
 
       dt = Date.parse(pickup_event['timestamp'])
       event = Icalendar::Event.new
@@ -429,15 +442,15 @@ helpers do
       checked_proxy = proxy_check(proxy)
 
       if checked_proxy['response_code'] == 200
-        logger.info("=== INFO - testing proxy server:     #{proxy} ===")
         logger.info("=== INFO - selected proxy server:    #{proxy} ===")
-
         return proxy
         break
       else
         logger.info("=== INFO - proxy did not return 200: #{proxy} ===")
       end
     end
+
+    return "no proxy selected"
   end
 
   # check if a proxy is reachable and if it can reach recycleapp.be
@@ -458,9 +471,17 @@ helpers do
         easy.proxy_tunnel = true
       }
 
-      @resp.perform
-      @resp.response_code
-      proxytotest['response_code'] = @resp.response_code
+      begin
+        @resp.perform
+        @resp.response_code
+        proxytotest['response_code'] = @resp.response_code
+      rescue
+        logger.info("=== ERROR: could not connect to #{proxy} ===")
+        proxytotest['response_code'] = '404'
+      end
+    else
+      logger.info("=== ERROR - proxy ping failed: #{proxy} ===")
+      proxytotest['response_code'] = '404'
     end
 
     return proxytotest

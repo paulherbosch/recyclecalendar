@@ -174,7 +174,7 @@ helpers do
         curl.proxy_url = $proxyserver
       end
     end
-    recycleapp_x_secret = recycleapp_main_js_script.body_str[/var n\=\"(.*?)\",r\=\"\/api\/app\/v1\/assets\/\"/,1]
+    recycleapp_x_secret = recycleapp_main_js_script.body_str[/var n\=\"(.*?)\",r\=\"\/assets\/\"/,1]
 
     # retrieve an access token on https://recycleapp.be/api/app/v1/access-token
     # using the scraped recycleapp_x_secret

@@ -99,7 +99,7 @@ end
 
 helpers do
   # this is the main function
-  # it pulls a pickup calendar from recycleapp.be based on postalcode, streetname and housenumber
+  # it pulls a pickup calendar from www.recycleapp.be based on postalcode, streetname and housenumber
   #
   def get_pickup_dates(postalcode,streetname,housenumber)
     # do we need to use a proxy?
@@ -112,12 +112,12 @@ helpers do
       end
     end
 
-    # construct the url we need to call to get all pickup events from recycleapp.be
+    # construct the url we need to call to get all pickup events from www.recycleapp.be
     #
-    # example: https://recycleapp.be/api/app/v1/collections?zipcodeId=1234-24043&streetId=https://data.vlaanderen.be/id/straatnaam-5678&houseNumber=100&fromDate=2020-11-01&untilDate=2020-12-31&size=100
+    # example: https://api.fostplus.be/recyclecms/app/v1/collections?zipcodeId=3212-24066&streetId=https://data.vlaanderen.be/id/straatnaam-35710&houseNumber=58&fromDate=2023-05-01&untilDate=2023-05-15&size=100
     recycleapp_url = construct_recycleapp_url(postalcode,streetname,housenumber)
 
-    # get a token to gain access to recycleapp.be
+    # get a token to gain access to www.recycleapp.be
     recycleapp_token = fetch_recycleapp_token($appconfig['recycleapp_token_url'])
 
     # fetch the actual pickup events
@@ -149,7 +149,7 @@ helpers do
     return pickup_events_simple
   end
 
-  # a token is required to get access to recycleapp.be
+  # a token is required to get access to www.recycleapp.be
   #
   # the value for recycleapp_x_secret, which is required to fetch the token, is hidden inside the main javascript file
   # we do a dirty scrape to fetch the filename of the main javascript
@@ -159,8 +159,8 @@ helpers do
   # This is dirty. Sorry.
   #
   def fetch_recycleapp_token(token_url)
-    # search for the main.*.chunk.js filename inside the html returned by https://recycleapp.be
-    recycleapp_index_html = Curl.get("https://recycleapp.be") do |curl|
+    # search for the main.*.chunk.js filename inside the html returned by https://www.recycleapp.be
+    recycleapp_index_html = Curl.get("https://www.recycleapp.be") do |curl|
       if $appconfig['proxies']
         curl.proxy_url = $proxyserver
       end
@@ -169,15 +169,14 @@ helpers do
 
     # in the main.*.js filename just scraped from the html,
     # search for the secret string we need to use as recycleapp_x_secret
-    recycleapp_main_js_script = Curl.get("https://recycleapp.be#{main_js_filename}") do |curl|
+    recycleapp_main_js_script = Curl.get("https://www.recycleapp.be#{main_js_filename}") do |curl|
       if $appconfig['proxies']
         curl.proxy_url = $proxyserver
       end
     end
-    recycleapp_x_secret = recycleapp_main_js_script.body_str[/var n\=\"(.*?)\",r\=\"\/assets\/\"/,1]
+    recycleapp_x_secret = recycleapp_main_js_script.body_str[/var n\=\"(.*?)\",r\=\"\/app\/v1\/assets\/\"/,1]
 
-    # retrieve an access token on https://recycleapp.be/api/app/v1/access-token
-    # using the scraped recycleapp_x_secret
+    # retrieve an access token using the scraped recycleapp_x_secret
     recycleapp_token_json = Curl.get(token_url) do |curl|
       curl.headers["Accept"]     = "application/json, text/plain, */*"
       curl.headers["x-consumer"] = "recycleapp.be"
@@ -218,7 +217,7 @@ helpers do
     # set the correct backend for the streetname
     $postalcode_matrix.each do |postalcoderange,backend|
       if postalcoderange.include? postalcode.to_i
-        # example: https://recycleapp.be/api/app/v1/collections?zipcodeId=1234-24043&streetId=https://data.vlaanderen.be/id/straatnaam-5678&houseNumber=100&fromDate=2020-11-01&untilDate=2020-12-31&size=100
+        # example: https://api.fostplus.be/recyclecms/app/v1/collections?zipcodeId=3212-24066&streetId=https://data.vlaanderen.be/id/straatnaam-35710&houseNumber=58&fromDate=2023-05-01&untilDate=2023-05-15&size=100
         recycleapp_url = recycleapp_base_url + "?zipcodeId=" + postalcode + "-" + zipcodeid + "&streetId=" + backend + "-" + streetnameid + "&houseNumber=" + housenumber + "&fromDate=" + @fromdate + "&untilDate=" + @untildate + "&size=100"
 
         return recycleapp_url
@@ -392,7 +391,7 @@ helpers do
     return cached_pickup_events
   end
 
-  # create an ICS object based on the events we pulled from recycleapp.be
+  # create an ICS object based on the events we pulled from www.recycleapp.be
   #
   def generate_ics(events,timezone, excludes)
     # create calendar object
@@ -430,13 +429,13 @@ helpers do
     return ical_string
   end
 
-  # loop over a list of proxies and select one that can reach recycleapp.be
+  # loop over a list of proxies and select one that can reach www.recycleapp.be
   #
   def select_proxy(proxies)
     # convert comma separtated list of proxies into array
     proxylist   = proxies.split(",")
 
-    # loop over proxylist and select a proxy that can reach recycleapp.be
+    # loop over proxylist and select a proxy that can reach www.recycleapp.be
     proxylist.each do |proxy|
       logger.info("=== INFO - testing proxy server:     #{proxy} ===")
       checked_proxy = proxy_check(proxy)
@@ -453,7 +452,7 @@ helpers do
     return "no proxy selected"
   end
 
-  # check if a proxy is reachable and if it can reach recycleapp.be
+  # check if a proxy is reachable and if it can reach www.recycleapp.be
   #
   def proxy_check(proxy)
     proxytotest                     = Hash.new
@@ -518,7 +517,7 @@ route :get, :post, '/' do
     cached_pickup_events = retrieve_cache_from_database(@ics_formatted_url)
 
     # if the address was found and the entry is younger than $appconfig['cache_ttl_days']
-    # do not contact recycleapp.be but display cached info instead
+    # do not contact www.recycleapp.be but display cached info instead
     if cached_pickup_events.count > 0 and cached_pickup_events.map(:created)[0] > $appconfig['cache_ttl_days'].to_i.days.ago
       cache_create_date = cached_pickup_events.map(:created)[0]
       logger.info("=== INFO - retrieving cached entry created on #{cache_create_date} ===")
@@ -528,8 +527,8 @@ route :get, :post, '/' do
       @fromdate      = cached_pickup_events.map(:fromdate)[0]
       @untildate     = cached_pickup_events.map(:untildate)[0]
     else
-      # get list of pickups from recycleapp.be
-      logger.info("=== INFO - no cache hit, retrieving from recycleapp.be ===")
+      # get list of pickups from www.recycleapp.be
+      logger.info("=== INFO - no cache hit, retrieving from www.recycleapp.be ===")
       @pickup_events = get_pickup_dates(postalcode,streetname,housenumber)
       @gemeentenaam  = @zipcodeid_streetnameid_gemeentenaam['gemeentenaam']
 

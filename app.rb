@@ -415,11 +415,11 @@ end
 
 # main page
 route :get, :post, '/' do
-  postalcode    = params['postalcode']            || $appconfig['postalcode']
-  streetname    = params['streetname'].capitalize || $appconfig['streetname']
-  housenumber   = params['housenumber']           || $appconfig['housenumber']
-  timezone      = params['timezone']              || $appconfig['timezone']
-  excludes      = params['excludes']              || $appconfig['excludes']
+  postalcode    = params['postalcode']  || $appconfig['postalcode']
+  streetname    = params['streetname']  || $appconfig['streetname']
+  housenumber   = params['housenumber'] || $appconfig['housenumber']
+  timezone      = params['timezone']    || $appconfig['timezone']
+  excludes      = params['excludes']    || $appconfig['excludes']
 
   $from_until_date = set_from_until_date(Date.today.strftime("%m"))
 

@@ -26,7 +26,7 @@ configure do
 
   # enable logging
   set :root, Dir.pwd
-  set :logger, Logger.new(STDERR)
+  set :logger, Logger.new(STDOUT)
 
   # bind
   set :bind, '0.0.0.0'
@@ -46,13 +46,10 @@ configure do
   #
 
   # Recycle App
+  $appconfig['recycleapp_api_url']   = ENV['RECYCLEAPP_API_URL']   || nil
   $appconfig['recycleapp_base_url']  = ENV['RECYCLEAPP_BASE_URL']  || nil
   $appconfig['recycleapp_token_url'] = ENV['RECYCLEAPP_TOKEN_URL'] || nil
  
-  # Vlaanderen API
-  $appconfig['vlaanderen_api_token'] = ENV['VLAANDEREN_API_TOKEN'] || nil
-  $appconfig['vlaanderen_api_url']   = ENV['VLAANDEREN_API_URL']   || nil
-
   # Timezone
   $appconfig['timezone'] = ENV['TIMEZONE']  || nil
 
@@ -66,31 +63,6 @@ configure do
 
   # Exclude list
   $appconfig['excludes'] = ENV['EXCLUDES'] || nil
-
-  # Postal Code Matrix - Use correct backend for streetname lookups
-  # Currently only addresses in Flanders can be resolved correctly
-  # 
-  # BE.BRUSSELS.BRIC.ADM.STR
-  # 1000 - 1999 Brussel, Halle-Vilvoorde en Waals-Brabant
-  #
-  # https://data.vlaanderen.be/id/straatnaam
-  # 2000 - 2999 provincie Antwerpen
-  # 3000 - 3999 arrondissement Leuven en provincie Limburg
-  # 8000 - 8999 West-Vlaanderen
-  # 9000 - 9999 Oost-Vlaanderen
-  #
-  # geodata.wallonie.be/id/streetname
-  # 4000 - 4999 provincie Luik
-  # 5000 - 5999 provincie Namen
-  # 6000 - 6999 Henegouwen (Oost) en Luxemburg (provincie)
-  # 7000 - 7999 Henegouwen (West)
-  
-  $postalcode_matrix = Hash.new
-  $postalcode_matrix[(1000..1999)] = "BE.BRUSSELS.BRIC.ADM.STR"
-  $postalcode_matrix[(2000..3999)] = "https://data.vlaanderen.be/id/straatnaam"
-  $postalcode_matrix[(4000..7999)] = "geodata.wallonie.be/id/streetname"
-  $postalcode_matrix[(8000..9999)] = "https://data.vlaanderen.be/id/straatnaam"
-
 end
 
 ############################
@@ -112,16 +84,21 @@ helpers do
       end
     end
 
-    # construct the url we need to call to get all pickup events from www.recycleapp.be
-    #
-    # example: https://api.fostplus.be/recyclecms/app/v1/collections?zipcodeId=3212-24066&streetId=https://data.vlaanderen.be/id/straatnaam-35710&houseNumber=58&fromDate=2023-05-01&untilDate=2023-05-15&size=100
-    recycleapp_url = construct_recycleapp_url(postalcode,streetname,housenumber)
-
     # get a token to gain access to www.recycleapp.be
     recycleapp_token = fetch_recycleapp_token($appconfig['recycleapp_token_url'])
 
+    zipcodeid        = fetch_zipcodeid(postalcode,recycleapp_token)
+    streetid         = fetch_streetid(streetname,zipcodeid,recycleapp_token)
+
+    pickup_date_params = Hash.new
+    pickup_date_params['zipcodeId']   = zipcodeid
+    pickup_date_params['streetId']    = streetid['street']
+    pickup_date_params['houseNumber'] = housenumber
+    pickup_date_params['fromDate']    = $from_until_date['from']
+    pickup_date_params['untilDate']   = $from_until_date['until']
+
     # fetch the actual pickup events
-    pickup_dates = Curl.get(recycleapp_url) do |curl|
+    pickup_dates = Curl.get("#{$appconfig['recycleapp_api_url']}/collections", pickup_date_params) do |curl|
       curl.headers["Accept"]          = "application/json, text/plain, */*"
       curl.headers["Authorization"]   = recycleapp_token
       curl.headers["x-consumer"]      = "recycleapp.be"
@@ -147,6 +124,76 @@ helpers do
     end
 
     return pickup_events_simple
+  end
+
+  def set_from_until_date(thismonth)
+    # Untildate is last day of this year. Last date with events in calendar
+    # Unless month is december, then search for events next year
+    # thismonth = Date.today.strftime("%m")
+    if thismonth == "12"
+      untilDate = Date.today.next_month.end_of_year.strftime("%F")
+    else
+      untilDate = Date.today.end_of_year.strftime("%F")
+    end
+
+    dates = Hash.new
+    dates['from']  = Date.today.beginning_of_month.strftime("%F")
+    dates['until'] = untilDate
+
+    return dates
+  end
+
+  def fetch_zipcodeid(postalcode,recycleapp_token)
+    postalcode_resp = Curl.get("#{$appconfig['recycleapp_api_url']}/zipcodes?q=#{postalcode}") do |curl|
+      curl.headers["Accept"]          = "application/json, text/plain, */*"
+      curl.headers["Authorization"]   = recycleapp_token
+      curl.headers["x-consumer"]      = "recycleapp.be"
+      if $appconfig['proxies']
+        curl.proxy_url                  = $proxyserver
+      end
+    end
+
+    postalcode_id = String.new
+    postalcode_json = JSON.parse(postalcode_resp.body_str)
+    postalcode_json['items'].each do |item|
+      if item['code'] == "#{postalcode}"
+        postalcode_id = item['id']
+        break
+      end
+    end
+
+    return postalcode_id
+  end
+
+  def fetch_streetid(streetname,zipcodeid,recycleapp_token)
+    streetname_resp = Curl.get("#{$appconfig['recycleapp_api_url']}/streets?q=#{streetname}&zipcodes=#{zipcodeid}") do |curl|
+      curl.headers["Accept"]          = "application/json, text/plain, */*"
+      curl.headers["Authorization"]   = recycleapp_token
+      curl.headers["x-consumer"]      = "recycleapp.be"
+      if $appconfig['proxies']
+        curl.proxy_url                  = $proxyserver
+      end
+    end
+
+    street_id    = String.new
+    gemeentenaam = String.new
+    city         = String.new
+
+    streetname_json = JSON.parse(streetname_resp.body_str)
+    streetname_json['items'].each do |item|
+      if item['names'].has_value? "#{streetname}"
+        street_id = item['id']
+        city      = item['zipcode'][0]['names'][0]['nl']
+        break
+      end
+    end
+
+    street_city = Hash.new
+    street_city['street'] = street_id
+    street_city['city']   = city
+
+    # return street_id
+    return street_city
   end
 
   # a token is required to get access to www.recycleapp.be
@@ -192,142 +239,9 @@ helpers do
     return recycleapp_token['accessToken']
   end
 
-  # generate the url we will pull all pickup events from
-  # 
-  def construct_recycleapp_url(postalcode,streetname,housenumber)
-    recycleapp_base_url = $appconfig['recycleapp_base_url']
-
-    # lookup id's for streetame and gemeentenaam (municipality)
-    @zipcodeid_streetnameid_gemeentenaam = fetch_zipcodeid_streetnameid_gemeentenaam(postalcode,streetname,housenumber)
-
-    zipcodeid    = @zipcodeid_streetnameid_gemeentenaam['zipcodeid']
-    streetnameid = @zipcodeid_streetnameid_gemeentenaam['streetnameid']
-
-    # Fromdate is first day of the month. Earliest date with events in calendar
-    @fromdate = Date.today.beginning_of_month.strftime("%F")
-
-    # Untildate is last day of this year. Last date with events in calendar
-    # Unless month is december, then search for events next year
-    thismonth = Date.today.strftime("%m")
-    if thismonth == "12"
-      @untildate = Date.today.next_month.end_of_year.strftime("%F")
-    else
-      @untildate = Date.today.end_of_year.strftime("%F")
-    end
-
-    # set the correct backend for the streetname
-    $postalcode_matrix.each do |postalcoderange,backend|
-      if postalcoderange.include? postalcode.to_i
-        # example: https://api.fostplus.be/recyclecms/app/v1/collections?zipcodeId=3212-24066&streetId=https://data.vlaanderen.be/id/straatnaam-35710&houseNumber=58&fromDate=2023-05-01&untilDate=2023-05-15&size=100
-        recycleapp_url = recycleapp_base_url + "?zipcodeId=" + postalcode + "-" + zipcodeid + "&streetId=" + backend + "-" + streetnameid + "&houseNumber=" + housenumber + "&fromDate=" + @fromdate + "&untilDate=" + @untildate + "&size=100"
-
-        return recycleapp_url
-      end
-    end
-  end
-
-  # consult api.basisregisters.vlaanderen.be to retrieve objectId's for postalcode and streetname
-  # these id's are required to construct the recycleapp_url
-  # we pull in 'gemeentenaam' (municipality) only to print a proper address in the HTML frontend
-  #
-  def fetch_zipcodeid_streetnameid_gemeentenaam(postalcode,streetname,housenumber)
-    # example: https://api.basisregisters.vlaanderen.be/v1/adresmatch?postcode=1234&straatnaam=hoofdstraat
-    vlaanderen_api_adresmatch   = Curl.get($appconfig['vlaanderen_api_url'] + "adresmatch?postcode=" + postalcode + "&straatnaam=" + streetname) do |curl|
-      curl.headers["Accept"]    = "application/json, text/plain, */*"
-      curl.headers["x-api-key"] = $appconfig['vlaanderen_api_token']
-    end
-
-    # fetch api result and http status code
-    vlaanderen_api_adresmatch_json            = JSON.parse(vlaanderen_api_adresmatch.body_str)
-    vlaanderen_api_adresmatch_http_statuscode = vlaanderen_api_adresmatch.status
-
-    # error handling - check if a valid result was retrieved from the api
-    if vlaanderen_api_adresmatch_http_statuscode.include? "200"
-      # if no warnings are present, we found a valid address
-      if vlaanderen_api_adresmatch_json['warnings'].empty?
-        vlaanderen_adresmatch = Hash.new
-        vlaanderen_adresmatch['zipcodeid']    = vlaanderen_api_adresmatch_json['adresMatches'][0]['gemeente']['objectId']
-        vlaanderen_adresmatch['streetnameid'] = vlaanderen_api_adresmatch_json['adresMatches'][0]['straatnaam']['objectId']
-        vlaanderen_adresmatch['gemeentenaam'] = vlaanderen_api_adresmatch_json['adresMatches'][0]['gemeente']['gemeentenaam']['geografischeNaam']['spelling']
-
-        # log address retrieval to database
-        add_record_to_database(postalcode,streetname,housenumber,vlaanderen_api_adresmatch_http_statuscode,"no warnings")
-
-        return vlaanderen_adresmatch
-      else
-        # the api returned a http 200 and some warning
-        @error_content = vlaanderen_api_adresmatch_json['warnings'][0]['message']
-
-        # log address retrieval to database
-        add_record_to_database(postalcode,streetname,housenumber,vlaanderen_api_adresmatch_http_statuscode,@error_content)
-
-        halt erb :ics
-      end
-    else
-      # the api did not return a http 200. fatal.
-      @error_content = "De zoekopdracht kon niet correct worden afgehandeld. HTTP status #{vlaanderen_api_adresmatch_http_statuscode}."
-
-      # log address retrieval to database
-      add_record_to_database(postalcode,streetname,housenumber,vlaanderen_api_adresmatch_http_statuscode,@error_content)
-
-      halt erb :ics
-    end
-  end
-
-  # log all address lookups to the database
-  #
-  def add_record_to_database(postalcode,streetname,housenumber,http_status,api_warning)
-    # connect to the database
-    $DB = Sequel.connect(
-      adapter:  'mysql2',
-      test:     true,
-      user:     $appconfig['mysql_user'],
-      password: $appconfig['mysql_password'],
-      host:     $appconfig['mysql_host'],
-      port:     $appconfig['mysql_port'],
-      database: $appconfig['mysql_database'])
-
-    # create addresses table if it doesn't exist
-    unless $DB.table_exists?(:addresses)
-      $DB.create_table :addresses do
-        primary_key :id
-        column :created, 'timestamp'
-        column :postalcode, Integer
-        column :streetname, String
-        column :housenumber, Integer
-        column :http_status, String
-        column :api_warning, String
-        column :format, String
-      end
-    end
-
-    # see how we were called (webinterface or ical program)
-    format = String.new
-    if params['getpickups']
-      format = "web"
-    elsif params['format']
-      format = "ics"
-    else
-      format = "undefined"
-    end
-
-    # insert a new record
-    table = $DB[:addresses]
-    table.insert(
-      postalcode:  postalcode,
-      streetname:  streetname,
-      housenumber: housenumber,
-      http_status: http_status,
-      api_warning: api_warning,
-      format:      format)
-
-    # clean up the database connection
-    $DB.disconnect
-  end
-
   # store pickup events in mysql cache
   #
-  def add_pickup_events_to_database(ics_formatted_url,pickup_events,gemeentenaam,fromdate,untildate)
+  def add_pickup_events_to_database(ics_formatted_url,pickup_events,fromdate,untildate)
     # connect to the database
     $DB = Sequel.connect(
       adapter:  'mysql2',
@@ -348,7 +262,6 @@ helpers do
     logger.info("=== INFO - add new cache record to database for #{ics_formatted_url} ===")
     pickup_event_cache.insert(
       request_url:   ics_formatted_url,
-      gemeentenaam:  gemeentenaam,
       fromdate:      fromdate,
       untildate:     untildate,
       pickup_events: pickup_events)
@@ -374,12 +287,11 @@ helpers do
     unless $DB.table_exists?(:cache)
       $DB.create_table :cache do
         primary_key :id
-        column :created, 'timestamp'
+        column :created, 'timestamp', :default => Sequel.lit("now()")
         column :request_url, String
-        column :gemeentenaam, String
         column :fromdate, String
         column :untildate, String
-        column :pickup_events, 'varchar(30000)'
+        column :pickup_events, 'mediumtext'
       end
     end
 
@@ -503,11 +415,13 @@ end
 
 # main page
 route :get, :post, '/' do
-  postalcode    = params['postalcode']    || $appconfig['postalcode']
-  streetname    = params['streetname']    || $appconfig['streetname']
-  housenumber   = params['housenumber']   || $appconfig['housenumber']
-  timezone      = params['timezone']      || $appconfig['timezone']
-  excludes      = params['excludes']      || $appconfig['excludes']
+  postalcode    = params['postalcode']            || $appconfig['postalcode']
+  streetname    = params['streetname'].capitalize || $appconfig['streetname']
+  housenumber   = params['housenumber']           || $appconfig['housenumber']
+  timezone      = params['timezone']              || $appconfig['timezone']
+  excludes      = params['excludes']              || $appconfig['excludes']
+
+  $from_until_date = set_from_until_date(Date.today.strftime("%m"))
 
   # set ics formatted url, used in the :ics template
   @ics_formatted_url = "#{request.scheme}://#{request.host}/?postalcode=#{postalcode}&streetname=#{streetname}&housenumber=#{housenumber}&format=ics"
@@ -524,17 +438,16 @@ route :get, :post, '/' do
       logger.info("=== INFO - retrieving cached entry created on #{cache_create_date} ===")
 
       @pickup_events = JSON.parse(Base64.decode64(cached_pickup_events.map(:pickup_events)[0]))
-      @gemeentenaam  = cached_pickup_events.map(:gemeentenaam)[0]
       @fromdate      = cached_pickup_events.map(:fromdate)[0]
       @untildate     = cached_pickup_events.map(:untildate)[0]
     else
       # get list of pickups from www.recycleapp.be
       logger.info("=== INFO - no cache hit, retrieving from www.recycleapp.be ===")
       @pickup_events = get_pickup_dates(postalcode,streetname,housenumber)
-      @gemeentenaam  = @zipcodeid_streetnameid_gemeentenaam['gemeentenaam']
 
       # store freshly retrieved pickup events in the database cache
-      add_pickup_events_to_database(@ics_formatted_url,Base64.encode64(@pickup_events.to_json),@zipcodeid_streetnameid_gemeentenaam['gemeentenaam'],@fromdate,@untildate)
+      # add_pickup_events_to_database(@ics_formatted_url,Base64.encode64(@pickup_events.to_json),@zipcodeid_streetnameid_gemeentenaam['gemeentenaam'],@fromdate,@untildate)
+      add_pickup_events_to_database(@ics_formatted_url,Base64.encode64(@pickup_events.to_json),$from_until_date['from'],$from_until_date['until'])
     end
 
     # generate a hash with info to display in the :ics template
@@ -542,7 +455,6 @@ route :get, :post, '/' do
     @pickupinfo['postalcode']   = postalcode 
     @pickupinfo['streetname']   = streetname 
     @pickupinfo['housenumber']  = housenumber 
-    @pickupinfo['gemeentenaam'] = @gemeentenaam
     @pickupinfo['fromdate']     = @fromdate
     @pickupinfo['untildate']    = @untildate
 

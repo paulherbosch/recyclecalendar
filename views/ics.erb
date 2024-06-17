@@ -22,7 +22,7 @@
 <% if @pickup_events %>
 
 <h4>Info</h4>
-<pre id="pickup_info" class="alert alert-info">Afvalkalender voor <%=h @pickupinfo['streetname'] %> <%=h @pickupinfo['housenumber'] %>, <%=h @pickupinfo['postalcode'] %> <%=h @pickupinfo['gemeentenaam'] %>. Van <%=h @pickupinfo['fromdate'] %> tot <%=h @pickupinfo['untildate'] %></pre>
+<pre id="pickup_info" class="alert alert-info">Afvalkalender voor <%=h @pickupinfo['streetname'] %> <%=h @pickupinfo['housenumber'] %>, postcode <%=h @pickupinfo['postalcode'] %>.</pre>
 
 <% if @pickup_events.any? %>
 
@@ -40,7 +40,7 @@ Kalender zonder notificaties
 <% else %>
 
 <h4>Geen data gevonden</h4>
-<pre id="no_data" class="alert alert-info">Voorlopig kan enkel data voor adressen in Vlaanderen opgevraagd worden.</pre>
+<pre id="no_data" class="alert alert-info">Sorry! Geen data gevonden voor dit adres ...</pre>
 <% end %>
 
 <% end %>

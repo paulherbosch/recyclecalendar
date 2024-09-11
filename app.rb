@@ -47,8 +47,6 @@ configure do
 
   # Recycle App
   $appconfig['recycleapp_api_url']   = ENV['RECYCLEAPP_API_URL']   || nil
-  $appconfig['recycleapp_base_url']  = ENV['RECYCLEAPP_BASE_URL']  || nil
-  $appconfig['recycleapp_token_url'] = ENV['RECYCLEAPP_TOKEN_URL'] || nil
  
   # Timezone
   $appconfig['timezone'] = ENV['TIMEZONE']  || nil
@@ -84,11 +82,8 @@ helpers do
       end
     end
 
-    # get a token to gain access to www.recycleapp.be
-    recycleapp_token = fetch_recycleapp_token($appconfig['recycleapp_token_url'])
-
-    zipcodeid        = fetch_zipcodeid(postalcode,recycleapp_token)
-    streetid         = fetch_streetid(streetname,zipcodeid,recycleapp_token)
+    zipcodeid        = fetch_zipcodeid(postalcode)
+    streetid         = fetch_streetid(streetname,zipcodeid)
 
     pickup_date_params = Hash.new
     pickup_date_params['zipcodeId']   = zipcodeid
@@ -100,7 +95,6 @@ helpers do
     # fetch the actual pickup events
     pickup_dates = Curl.get("#{$appconfig['recycleapp_api_url']}/collections", pickup_date_params) do |curl|
       curl.headers["Accept"]          = "application/json, text/plain, */*"
-      curl.headers["Authorization"]   = recycleapp_token
       curl.headers["x-consumer"]      = "recycleapp.be"
       if $appconfig['proxies']
         curl.proxy_url                  = $proxyserver
@@ -143,10 +137,9 @@ helpers do
     return dates
   end
 
-  def fetch_zipcodeid(postalcode,recycleapp_token)
+  def fetch_zipcodeid(postalcode)
     postalcode_resp = Curl.get("#{$appconfig['recycleapp_api_url']}/zipcodes?q=#{postalcode}") do |curl|
       curl.headers["Accept"]          = "application/json, text/plain, */*"
-      curl.headers["Authorization"]   = recycleapp_token
       curl.headers["x-consumer"]      = "recycleapp.be"
       if $appconfig['proxies']
         curl.proxy_url                  = $proxyserver
@@ -165,10 +158,9 @@ helpers do
     return postalcode_id
   end
 
-  def fetch_streetid(streetname,zipcodeid,recycleapp_token)
+  def fetch_streetid(streetname,zipcodeid)
     streetname_resp = Curl.get("#{$appconfig['recycleapp_api_url']}/streets?q=#{streetname}&zipcodes=#{zipcodeid}") do |curl|
       curl.headers["Accept"]          = "application/json, text/plain, */*"
-      curl.headers["Authorization"]   = recycleapp_token
       curl.headers["x-consumer"]      = "recycleapp.be"
       if $appconfig['proxies']
         curl.proxy_url                  = $proxyserver
@@ -194,49 +186,6 @@ helpers do
 
     # return street_id
     return street_city
-  end
-
-  # a token is required to get access to www.recycleapp.be
-  #
-  # the value for recycleapp_x_secret, which is required to fetch the token, is hidden inside the main javascript file
-  # we do a dirty scrape to fetch the filename of the main javascript
-  # then we search for the secret string inside the javascript file
-  # and use that string to retrieve the token
-  #
-  # This is dirty. Sorry.
-  #
-  def fetch_recycleapp_token(token_url)
-    # search for the main.*.chunk.js filename inside the html returned by https://www.recycleapp.be
-    recycleapp_index_html = Curl.get("https://www.recycleapp.be") do |curl|
-      if $appconfig['proxies']
-        curl.proxy_url = $proxyserver
-      end
-    end
-    main_js_filename = recycleapp_index_html.body_str[/(?:src="| )(\/static\/js\/main\..*?\.chunk\.js)/,1]
-
-    # in the main.*.js filename just scraped from the html,
-    # search for the secret string we need to use as recycleapp_x_secret
-    recycleapp_main_js_script = Curl.get("https://www.recycleapp.be#{main_js_filename}") do |curl|
-      if $appconfig['proxies']
-        curl.proxy_url = $proxyserver
-      end
-    end
-
-    recycleapp_x_secret = recycleapp_main_js_script.body_str[/\(function\(\)\{return c\}\)\);var n\=\"(.*?)\",r\=\"/,1]
-
-    # retrieve an access token using the scraped recycleapp_x_secret
-    recycleapp_token_json = Curl.get(token_url) do |curl|
-      curl.headers["Accept"]     = "application/json, text/plain, */*"
-      curl.headers["x-consumer"] = "recycleapp.be"
-      curl.headers["x-secret"]   = recycleapp_x_secret
-      if $appconfig['proxies']
-        curl.proxy_url           = $proxyserver
-      end
-    end
-
-    recycleapp_token = JSON.parse(recycleapp_token_json.body_str)
-
-    return recycleapp_token['accessToken']
   end
 
   # store pickup events in mysql cache
@@ -446,7 +395,6 @@ route :get, :post, '/' do
       @pickup_events = get_pickup_dates(postalcode,streetname,housenumber)
 
       # store freshly retrieved pickup events in the database cache
-      # add_pickup_events_to_database(@ics_formatted_url,Base64.encode64(@pickup_events.to_json),@zipcodeid_streetnameid_gemeentenaam['gemeentenaam'],@fromdate,@untildate)
       add_pickup_events_to_database(@ics_formatted_url,Base64.encode64(@pickup_events.to_json),$from_until_date['from'],$from_until_date['until'])
     end
 

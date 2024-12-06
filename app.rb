@@ -392,7 +392,7 @@ route :get, :post, '/' do
     else
       # get list of pickups from www.recycleapp.be
       logger.info("=== INFO - no cache hit, retrieving from www.recycleapp.be ===")
-      @pickup_events = get_pickup_dates(postalcode,streetname,housenumber)
+      @pickup_events = get_pickup_dates(postalcode,streetname.split.map(&:capitalize).join(' '),housenumber)
 
       # store freshly retrieved pickup events in the database cache
       add_pickup_events_to_database(@ics_formatted_url,Base64.encode64(@pickup_events.to_json),$from_until_date['from'],$from_until_date['until'])

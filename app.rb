@@ -121,14 +121,13 @@ helpers do
   end
 
   def set_from_until_date(thismonth)
-    # Untildate is last day of this year. Last date with events in calendar
-    # Unless month is december, then search for events next year
-    # thismonth = Date.today.strftime("%m")
-    if thismonth == "12"
-      untilDate = Date.today.next_month.end_of_year.strftime("%F")
-    else
-      untilDate = Date.today.end_of_year.strftime("%F")
-    end
+    # from  = beginning of this month
+    # until = next year
+    #
+    # api returns 20 results by default.
+    # events will refresh every time the cached results in the database expire.
+    #
+    untilDate = Date.today.next_year.strftime("%F")
 
     dates = Hash.new
     dates['from']  = Date.today.beginning_of_month.strftime("%F")

@@ -108,12 +108,17 @@ helpers do
     pickup_events_simple = Array.new
     pickup_events_json['items'].each do |item|
       if item['type'] == "collection"
-        pickup = Hash.new
-        pickup['timestamp']          = item['timestamp']
-        pickup['formattedtimestamp'] = Date.parse(item['timestamp']).strftime("%A %d-%m-%Y")
-        pickup['fraction']           = item['fraction']['name']['nl'] 
-        pickup['color']              = item['fraction']['color']
-        pickup_events_simple.push(pickup)
+        # do not store pickups that have been recplaced. e.g. because of publiq holidays
+        if item.key?("exception") and item['exception'].key?("replacedBy")
+          next
+        else
+          pickup = Hash.new
+          pickup['timestamp']          = item['timestamp']
+          pickup['formattedtimestamp'] = Date.parse(item['timestamp']).strftime("%A %d-%m-%Y")
+          pickup['fraction']           = item['fraction']['name']['nl']
+          pickup['color']              = item['fraction']['color']
+          pickup_events_simple.push(pickup)
+        end
       end
     end
 

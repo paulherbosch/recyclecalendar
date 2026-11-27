@@ -17,7 +17,10 @@ see the .env.example file for a list of expected environment variables
 
 # Caching
 The app stores a list of pickup events in a database caching table to reduce the number of api calls made to recycleapp.be.  
-Each cache entry expires after 14 days by default.
+Each cache entry expires after 14 days by default.  
+The database is MySQL by default (the `MYSQL_*` variables).  
+Set `DATABASE_URL` to use another database, e.g. a SQLite file: `DATABASE_URL="sqlite:///tmp/recyclecalendar.db"`.  
+The cache table is created on the first request.
 
 # Issues
 recycleapp.be seems to be blocking access to their API for certain ip addresses.  

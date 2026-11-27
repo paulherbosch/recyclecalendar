@@ -8,7 +8,6 @@ require 'icalendar'
 require 'date'
 require 'active_support'
 require 'active_support/core_ext' 
-require 'mysql2'
 require 'sequel'
 require 'net/ping'
 require 'base64'
@@ -33,6 +32,12 @@ configure do
 
   # populate appconfig hash via environment vars or read from the .env config file
   $appconfig = Hash.new
+
+  # Database backend
+  # DATABASE_URL: a Sequel connection string, e.g. sqlite:///tmp/recyclecalendar.db
+  # when it is not set, the MySQL settings below are used
+  #
+  $appconfig['database_url']   = ENV['DATABASE_URL']   || nil
 
   # Mysql backend
   #
@@ -192,18 +197,28 @@ helpers do
     return street_city
   end
 
-  # store pickup events in mysql cache
+  # connect to the cache database: DATABASE_URL when it is set, MySQL otherwise
+  #
+  def connect_to_database
+    if $appconfig['database_url']
+      Sequel.connect($appconfig['database_url'], test: true)
+    else
+      Sequel.connect(
+        adapter:  'mysql2',
+        test:     true,
+        user:     $appconfig['mysql_user'],
+        password: $appconfig['mysql_password'],
+        host:     $appconfig['mysql_host'],
+        port:     $appconfig['mysql_port'],
+        database: $appconfig['mysql_database'])
+    end
+  end
+
+  # store pickup events in the database cache
   #
   def add_pickup_events_to_database(ics_formatted_url,pickup_events,fromdate,untildate)
     # connect to the database
-    $DB = Sequel.connect(
-      adapter:  'mysql2',
-      test:     true,
-      user:     $appconfig['mysql_user'],
-      password: $appconfig['mysql_password'],
-      host:     $appconfig['mysql_host'],
-      port:     $appconfig['mysql_port'],
-      database: $appconfig['mysql_database'])
+    $DB = connect_to_database
 
     pickup_event_cache = $DB[:cache]
 
@@ -227,20 +242,13 @@ helpers do
   #
   def retrieve_cache_from_database(ics_formatted_url)
     # connect to the database
-    $DB = Sequel.connect(
-      adapter:  'mysql2',
-      test:     true,
-      user:     $appconfig['mysql_user'],
-      password: $appconfig['mysql_password'],
-      host:     $appconfig['mysql_host'],
-      port:     $appconfig['mysql_port'],
-      database: $appconfig['mysql_database'])
+    $DB = connect_to_database
 
     # create addresses table if it doesn't exist
     unless $DB.table_exists?(:cache)
       $DB.create_table :cache do
         primary_key :id
-        column :created, 'timestamp', :default => Sequel.lit("now()")
+        column :created, 'timestamp', :default => Sequel::CURRENT_TIMESTAMP
         column :request_url, String
         column :fromdate, String
         column :untildate, String
@@ -381,7 +389,7 @@ route :get, :post, '/' do
 
   # check if a valid request comes in
   if params['getpickups'] or params['format'] == 'ics' or (postalcode and streetname and housenumber)
-    # check if pickup events already exists in the mysql cache
+    # check if pickup events already exists in the database cache
     cached_pickup_events = retrieve_cache_from_database(@ics_formatted_url)
 
     # if the address was found and the entry is younger than $appconfig['cache_ttl_days']
